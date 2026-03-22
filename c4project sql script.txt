@@ -1,0 +1,313 @@
+task 1 queries
+
+1. use ups_logistics
+select order_id, count(*) as
+total_records 
+from orders
+group by order_id
+having count(*) > 1; 
+
+2. delete from orders 
+where Order_ID IN (
+select Order_ID 
+FROM ( 
+select Order_ID,
+row_number() OVER
+(partition by Order_ID order by
+Order_Date) AS rn 
+from orders 
+) t 
+where rn > 1 
+);
+
+3. select * from routes
+where traffic_delay_min is null;
+
+4. update routes r 
+join ( 
+select route_id,
+avg( traffic_delay_min) as avg_delay 
+from routes
+where traffic_delay_min is not null
+group by route_id 
+) a
+on r.route_id = a.route_id
+set r.traffic_delay_min =
+a.avg_delay 
+where r.traffic_delay_min is null;
+
+5. update orders
+set 
+order_date = date(order_date),
+expected_delivery_date =
+date(expected_delivery_date),
+actual_delivery_date =
+date(actual_delivery_date);
+
+6. alter table orders
+add invalid_record varchar(5);
+update orders
+set invalid_record =
+case
+when actual_delivery_date < 
+order_date then 'yes' 
+else 'no' 
+end;
+
+7. select* 
+from orders 
+where invalid_record = 'yes';
+
+task 2 queries
+
+1. SELECT 
+    route_id,
+    AVG(
+        DATEDIFF(actual_delivery_date, expected_delivery_date)
+    ) AS avg_delay_days
+FROM orders
+WHERE invalid_record = 'no'
+  AND actual_delivery_date > expected_delivery_date
+GROUP BY route_id
+ORDER BY avg_delay_days DESC
+LIMIT 10;
+
+2. select 
+order_id,
+expected_delivery_date,
+actual_delivery_date,
+datediff(actual_delivery_date,
+expected_delivery_date) as 
+delay_days
+from orders
+where invalid_record = 'no';
+
+3. select
+r.route_id,
+r.start_location,
+r.end_location,
+avg(datediff(o.actual_delivery_date,
+o.expected_delivery_date)) as
+avg_delay_days
+from orders o
+join routes r
+on o.route_id = r.Route_ID
+where o.invalid_record = 'no' 
+group by r.Route_ID,
+r.Start_Location,r.End_Location
+order by avg_delay_days desc
+limit 10;
+
+4. select
+order_id,
+warehouse_id,
+datediff(actual_delivery_date,
+expected_delivery_date) as
+delay_days,
+rank() over (
+partition by warehouse_id
+order by 
+datediff(actual_delivery_date,
+expected_delivery_date) desc
+) as delay_rank
+from orders 
+where invalid_record = 'no';
+
+task 3 queries
+
+1. select
+r.route_id,
+r.start_location,
+r.end_location,
+/* average delivery time in days */
+avg(datediff(o.actual_delivery_date,o.order_date)) as
+avg_delivery_time_days,
+/* average traffic delay */ 
+avg(r.traffic_delay_min) as
+avg_traffic_delay_min,
+/* distance to time efficiency ratio */
+(r.distance_km/r.average_travel_time_min) as
+efficiency_ratio
+from routes r
+join orders o 
+on r.route_id = o.route_id
+where o.invalid_record = 'no'
+group by r.route_id, r.start_location, r.end_location, r.distance_km, r.average_travel_time_min;
+
+2. select*
+from(
+select
+r.route_id,
+r.start_location,
+r.end_location,
+(r.distance_km/ 
+r.average_travel_time_min) as
+efficiency_ratio 
+from routes r
+) t 
+order by efficiency_ratio asc
+limit 3;
+
+3. select
+r.route_id,
+count(o.order_id) as
+total_order,
+sum(
+case
+when
+datediff(o.actual_delivery_date,o.expected_delivery_date) > 0
+then 1 else 0
+end
+) as delayed_orders,
+(sum( 
+case
+when
+datediff(o.actual_delivery_date,o.expected_delivery_date)>0
+then 1 else 0
+end)* 100.0/count(o.order_id))as delay_percentage
+from routes r join orders o 
+on r.route_id = o.Route_ID
+where o.invalid_record = 'no' group by r.Route_ID having delay_percentage> 20;
+
+task 4 queries
+
+1. select
+w.warehouse_id,w.location,
+count(o.order_id) as total_shipments,
+sum( 
+case
+when
+datediff(o.actual_delivery_date,o.expected_delivery_date)>0
+then 1 else 0 
+end
+) as delayed_shipments 
+from warehouses w
+ join orders o
+ on w.Warehouse_ID = o.Warehouse_ID
+ where o.invalid_record ='no'
+ group by w.Warehouse_ID,w.Location;
+
+2. select
+warehouse_id,
+location,
+avg(processing_time_min)as
+avg_processing_time
+from warehouses
+group by warehouse_id, location
+order by avg_processing_time desc
+limit 3;
+
+3. with global_avg as ( 
+select avg(processing_time_min)
+as global_avg_time
+from warehouses)
+select w.warehouse_id,w.location,w.processing_time_min
+from warehouses w 
+join global_avg g
+on w.Processing_Time_Min>g.global_avg_time;
+
+4. select w.warehouse_id,w.location,
+(sum(
+case
+when
+datediff(o.actual_delivery_date,o.expected_delivery_date)<=0
+then 1 else 0
+end
+)*100.0/count(o.order_id))
+as on_time_percentage,
+rank()over( 
+order by
+(sum(
+case
+when 
+datediff(o.actual_delivery_date,o.expected_delivery_date) <=0
+then 1 else 0 
+end
+)* 100.0/
+count(o.order_id)) desc
+) as warehouse_rank 
+from warehouses w join orders o 
+on w.Warehouse_ID=o.Warehouse_ID
+where o.invalid_record ='no'
+group by w.Warehouse_ID,w.Location;
+
+task 5 queries 
+
+1. select d.agent_id,d.route_id,r.start_location,r.end_location,d.on_time_percentage,
+rank() over (
+partition by d.route_id 
+order by 
+d.on_time_percentage desc
+) as agent_rank 
+from deliveryagents d
+join routes r
+on d.Route_ID=r.Route_ID;
+
+2. select agent_id, route_id, on_time_percentage
+from deliveryagents
+where On_Time_Percentage<80;
+
+3. select 'top 5 agents' as agent_group,
+avg(avg_speed_km_hr) as avg_speed
+from ( select Avg_Speed_KM_HR
+from deliveryagents 
+order by On_Time_Percentage desc 
+limit 5 ) t 
+union all 
+select 'bottom 5 agents' as agent_group, 
+avg(Avg_Speed_KM_HR) as avg_speed 
+from( select Avg_Speed_KM_HR 
+from deliveryagents 
+order by On_Time_Percentage asc limit 5 ) b;
+
+task 6 queries 
+
+1. select
+order_id,
+max(checkpoint_time) as
+last_checkpoint_time
+from shipment_tracking
+group by order_id;
+
+2. select
+delay_reason,
+count(*) as total_delays
+from shipment_tracking
+where Delay_Reason is not null
+and Delay_Reason <> 'none'
+group by Delay_Reason
+order by total_delays desc;
+
+3. select
+order_id,
+count(*) as delayed_checkpoints
+from shipment_tracking
+where Delay_Reason is not null
+and Delay_Reason <> 'none'
+group by Order_ID
+having count(*) > 2;
+
+task 7 queries
+
+1. select
+r.start_location,
+avg(datediff(o.actual_delivery_date,o.expected_delivery_date))
+as avg_delivery_delay_days
+from orders o 
+join routes r 
+on o.Route_ID = r.Route_ID
+group by r.Start_Location;
+
+2. select
+round(sum(case when 
+actual_delivery_date<=expected_delivery_date
+then 1 else 0
+end)*100.0/count(*),2)
+as on_time_delivery_percentage
+from orders;
+
+3. select
+route_id,
+avg(traffic_delay_min) as avg_traffic_delay_min
+from routes
+group by Route_ID; 
